@@ -57,10 +57,10 @@ class RestoreCommandDispatcher extends AnyRef with CommandDispatcher {
         false  
       }
 
-      val saleExistsOpt = consolePathOpt.map((consolePath: String) => {
+      val saleExistsOpt = if (isValidUser) consolePathOpt.map((consolePath: String) => {
         val checkSaleExistExpr = "(HypoOrder.find_by_sale_id " + saleID + ") != nil"
         (("echo " + checkSaleExistExpr) #| consolePath).lines.mkString.contains("true")
-      })
+      }) else None
 
       (consolePathOpt, isValidUser, saleExistsOpt) match {
         case (None, _, _) => chat.reply("restore-dispatcher.rails-console-path 沒設定好，無法使用此功能。")
