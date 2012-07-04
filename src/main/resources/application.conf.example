@@ -1,0 +1,6 @@
+gtalk-username="email@gmail.com"
+gtalk-password="password"
+
+restore-dispatcher {
+  rails-console-path="/path/to/rails/console"
+}
