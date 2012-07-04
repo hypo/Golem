@@ -1,6 +1,9 @@
 gtalk-username="email@gmail.com"
 gtalk-password="password"
 
+# if not set, everyone is invalid user.
+authorized-users=["admin1@gmail.com"]
+
 restore-dispatcher {
   rails-console-path="/path/to/rails/console"
 }
