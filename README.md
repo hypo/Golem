@@ -6,4 +6,4 @@ Golem - Hypo automation bot via XMPP (i.e. GoogleTalk, iChat)
 
   2. Chat to him. You can use the following commands:
 
-    - `restore #12345`: 把 wide/square 的進度放回。
+  - `restore #12345`: 把 wide/square 的進度放回。
