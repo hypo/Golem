@@ -50,7 +50,7 @@ class RestoreCommandDispatcher extends Object with CommandDispatcher {
         case (Some(consolePath), Some(false)) => chat.sendMessage("找不到 #" + saleID)
         case (Some(consolePath), Some(true)) => {
           val restoreExpression = "o=HypoOrder.find_by_sale_id " + saleID + ";b=o.to_book;b.save"
-          val output = (("echo " + checkSaleExistExpr) #| consolePath).lines.mkString("\n")
+          val output = (("echo " + restoreExpression) #| consolePath).lines.mkString("\n")
           if (output.contains("=> true"))
             chat.sendMessage("成功放回 #" + saleID)
           else
