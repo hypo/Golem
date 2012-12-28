@@ -2,3 +2,5 @@ src/main/resources/application.conf
 target/*
 project/target
 log/*
+nohup.out
+*~
