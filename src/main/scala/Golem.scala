@@ -33,7 +33,8 @@ object Golem {
     chatManager.addChatListener(new ConversationListener())
 
     while (true) {
-      System.in.read  
+      System.in.read
+      Thread.sleep(100)
     }
   }
 }
