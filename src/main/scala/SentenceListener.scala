@@ -50,7 +50,10 @@ class SentenceListener(val config: Config) extends MessageListener {
   }
 
   val dispatchers = List(
-    new RestoreCommandDispatcher(config.stringListOpt("authorized-users") getOrElse List()),
+    new RestoreCommandDispatcher(
+      admins = config.stringListOpt("authorized-users") getOrElse List(), 
+      consolePath = config.stringOpt("restore-dispatcher.rails-console-path").getOrElse("/bin/cat")
+    ),
     new UnknowCommandDispatcher()
   )
 
@@ -87,7 +90,7 @@ object VerbWithSaleID {
   }
 }
 
-class RestoreCommandDispatcher(val admins: List[String], val consolePath: String = "/bin/cat") extends AnyRef with CommandDispatcher {
+class RestoreCommandDispatcher(val admins: List[String], val consolePath: String) extends AnyRef with CommandDispatcher {
   
   def restoreSaleToEditor(saleID: String, toAccount: Option[String] = None): String = {
     import scala.language.postfixOps
