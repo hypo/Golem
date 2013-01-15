@@ -6,7 +6,8 @@ import com.typesafe.config._
 
 class ConversationListener extends ChatManagerListener {
   override def chatCreated(chat: Chat, createdLocally: Boolean): Unit = {
-    chat.addMessageListener(new SentenceListener())
+    println(s"Chat created: " + chat)
+    chat.addMessageListener(new SentenceListener(ConfigFactory.load))
   }
 }
 
@@ -14,7 +15,7 @@ object Golem {
   def main(args: Array[String]): Unit = {
     val conf = ConfigFactory.load()
     if (!conf.hasPath("gtalk-username") || !conf.hasPath("gtalk-password")) {
-      System.err.println("Need to specify gtalk-username and gtalk-password.")      
+      System.err.println("Need to specify gtalk-username and gtalk-password.")
       sys.exit
     }
 

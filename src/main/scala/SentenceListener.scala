@@ -5,22 +5,26 @@ import org.jivesoftware.smack.packet._
 import scala.sys.process._
 import com.typesafe.config._
 import scala.collection.JavaConverters._
+import java.io._
 
-class SentenceListener extends MessageListener {
-  val dispatchers = List(
-    new RestoreCommandDispatcher(),
-    new UnknowCommandDispatcher()
-  )
-  val composedDispatcher = dispatchers.map(_.process).reduceLeft((f1, f2) => f1 orElse f2)
+/* Add convenient method to Config */
+object Implicits {
+  import scala.language.implicitConversions
 
-  override def processMessage(chat: Chat, message: Message): Unit = {
-    println("[RCV] " + message.getFrom + ": " + message.getBody)
-    composedDispatcher(chat, message)
-  }	
-}
+  class ConfigWrapper(val config: Config) {
+    def stringOpt(path: String): Option[String] = {
+      if (config.hasPath(path)) Some(config.getString(path))
+      else None
+    }
 
-trait CommandDispatcher {
-  def process: PartialFunction[(Chat, Message), Option[CommandDispatcher]]
+    def stringListOpt(path: String): Option[List[String]] = {
+      if (config.hasPath(path)) Some(config.getStringList(path).asScala.toList)
+      else None
+    }
+  }
+
+  implicit def configToWrapper(config: Config): ConfigWrapper = new ConfigWrapper(config)
+  implicit def wrapperToConfig(wrapper: ConfigWrapper): Config = wrapper.config
 
   class ChatExtensionWrapper(val chat: Chat) {
     def reply(msg: String) = {
@@ -33,58 +37,95 @@ trait CommandDispatcher {
   implicit def extensionWrapperToChat(wrapper: ChatExtensionWrapper): Chat = wrapper.chat
 }
 
-object VerbWithSaleID {
-  val VerbWithSaleIDPattern = """(?i)(\w+)\s*#?(\d+)""".r
-  def unapply(m: Message) = m.getBody match {
-    case VerbWithSaleIDPattern(verb, saleID) => Some((verb.toLowerCase, saleID, m.getFrom))
-    case _ => None
+
+case class Request(sender: String, body: String)
+
+
+class SentenceListener(val config: Config) extends MessageListener {
+  import Implicits._
+
+  override def processMessage(chat: Chat, message: Message): Unit = {
+    println("[RCV] " + message.getFrom + ": " + message.getBody)
+    chat reply composedDispatcher(Request(sender = message.getFrom, body = message.getBody))
+  }
+
+  val dispatchers = List(
+    new RestoreCommandDispatcher(config.stringListOpt("authorized-users") getOrElse List()),
+    new UnknowCommandDispatcher()
+  )
+
+  // Expand the dispathers (d1, d2, d3, …) to 
+  //   d1.process orElse d2.process orElse d3.process ...
+  val composedDispatcher = dispatchers.map(_.process).reduceLeft((f1, f2) => f1 orElse f2)
+}
+
+trait CommandDispatcher {
+  def process: PartialFunction[Request, String]
+
+  def requireAdmin(sender: String, admins: List[String])(f: => String): String = {
+    if (admins.exists(admin => sender.startsWith(admin + "/"))) f
+    else "你不是管理者，你壞壞。"
   }
 }
 
-class RestoreCommandDispatcher extends AnyRef with CommandDispatcher {
-  def process = {
-    case (chat, VerbWithSaleID("restore", saleID, sender)) => {
-      val conf = ConfigFactory.load()
-      val consolePathOpt = if (conf.hasPath("restore-dispatcher.rails-console-path")) {
-        Some(conf.getString("restore-dispatcher.rails-console-path"))
-      } else {
-        None
-      }
+object VerbWithSaleID {
+  val VerbPattern = """(?i)(\w+)""".r
+  /* the (?i)  makes the match case insensitive the complete set of options are:
+  (?idmsux)
+  i - case insensitive
+  d - only unix lines are recognized as end of line
+  m - enable multiline mode
+  s - . matches any characters including line end
+  u - Enables Unicode-aware case folding
+  x - Permits whitespace and comments in pattern
+  */
+  val SaleIDPattern = """#?(\d+)""".r
+
+  def unapply(req: Request) = req.body.split(" ").toList match {
+    case VerbPattern(verb) :: SaleIDPattern(saleID) :: restArgs ⇒ Some((verb.toLowerCase, saleID, restArgs, req))
+    case _ ⇒ None
+  }
+}
+
+class RestoreCommandDispatcher(val admins: List[String], val consolePath: String = "/bin/cat") extends AnyRef with CommandDispatcher {
+  
+  def restoreSaleToEditor(saleID: String, toAccount: Option[String] = None): String = {
+    import scala.language.postfixOps
+
+    def runCommandWithStdin(command: String, stdin: String): Seq[String] = {
+      println("Running: " + command)
+      println("With: " + stdin)
+      Process(command) #< new ByteArrayInputStream(s"$stdin\n".getBytes("UTF-8")) lines_!
+    }
       
-      val isValidUser = if (conf.hasPath("authorized-users")) {
-        conf.getStringList("authorized-users").asScala.find(adminAccount => sender.startsWith(adminAccount + "/")).isDefined
-      } else {
-        false  
-      }
+    val checkSaleExpression = s"(HypoOrder.find_by_sale_id $saleID) != nil"
+    val restoreExpression = 
+                            s"o = HypoOrder.find_by_sale_id $saleID;" +
+                            "b = o.to_book;" +
+                            toAccount.map(account ⇒ s"b.user = '$account';").getOrElse("") +
+                            "b.save"
 
-      val saleExistsOpt = if (isValidUser) consolePathOpt.map((consolePath: String) => {
-        val checkSaleExistExpr = "(HypoOrder.find_by_sale_id " + saleID + ") != nil"
-        (("echo " + checkSaleExistExpr) #| consolePath).lines.mkString.contains("true")
-      }) else None
+    if (!runCommandWithStdin(consolePath, checkSaleExpression).last.contains("true"))
+      s"找不到 #${saleID}"
+    else {
+      val output = runCommandWithStdin(consolePath, restoreExpression)
+      if (output.mkString.contains("=> true")) s"成功放回 #$saleID" + toAccount.map(account ⇒ " to $account").getOrElse("")
+      else "好像有錯誤喔：\n" + output.mkString("\n")
+    }
+  }
 
-      (consolePathOpt, isValidUser, saleExistsOpt) match {
-        case (None, _, _) => chat.reply("restore-dispatcher.rails-console-path 沒設定好，無法使用此功能。")
-        case (_, false, _) => chat.reply("你不是管理者，你壞壞。")
-        case (Some(consolePath), true, Some(false)) => chat.reply("找不到 #" + saleID)
-        case (Some(consolePath), true, Some(true)) => {
-          val restoreExpression = "o=HypoOrder.find_by_sale_id " + saleID + ";b=o.to_book;b.save"
-          val output = (("echo " + restoreExpression) #| consolePath).lines.mkString("\n")
-          if (output.contains("=> true"))
-            chat.reply("成功放回 #" + saleID)
-          else
-            chat.reply("好像有錯誤喔：\n" + output)
-        }
-      }
-      None
+  def process = {
+    case VerbWithSaleID("restore", saleID, Nil, req) ⇒ requireAdmin(req.sender, admins) {
+      restoreSaleToEditor(saleID)
+    }
+    case VerbWithSaleID("restore", saleID, List("to", email), req) ⇒ requireAdmin(req.sender, admins) {
+      restoreSaleToEditor(saleID, Some(email))
     }
   }
 }
 
 class UnknowCommandDispatcher extends AnyRef with CommandDispatcher {
   def process = {
-    case (chat, message) => {
-      chat.reply("什麼是 \"" + message.getBody + "\"？")
-      None
-    }
+    case req: Request ⇒ s"什麼是 '${req.body}'？"
   }
 }
