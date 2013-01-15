@@ -114,7 +114,7 @@ class RestoreCommandDispatcher(val admins: List[String], val consolePath: String
       s"找不到 #${saleID}"
     else {
       val output = runCommandWithStdin(consolePath, restoreExpression)
-      if (output.mkString.contains("=> true")) s"成功放回 #$saleID" + toAccount.map(account ⇒ " to $account").getOrElse("")
+      if (output.mkString.contains("=> true")) s"成功放回 #$saleID" + toAccount.map(account ⇒ s" to $account").getOrElse("")
       else "好像有錯誤喔：\n" + output.mkString("\n")
     }
   }
