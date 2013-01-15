@@ -98,7 +98,9 @@ class RestoreCommandDispatcher(val admins: List[String], val consolePath: String
     def runCommandWithStdin(command: String, stdin: String): Seq[String] = {
       println("Running: " + command)
       println("With: " + stdin)
-      Process(command) #< new ByteArrayInputStream(s"$stdin\n".getBytes("UTF-8")) lines_!
+      val output: Seq[String] = (Process(command) #< new ByteArrayInputStream(s"$stdin\n" getBytes "UTF-8")).lines_!
+      println("Output: " + output.mkString("\n"))
+      output
     }
       
     val checkSaleExpression = s"(HypoOrder.find_by_sale_id $saleID) != nil"
@@ -108,7 +110,7 @@ class RestoreCommandDispatcher(val admins: List[String], val consolePath: String
                             toAccount.map(account ⇒ s"b.user = '$account';").getOrElse("") +
                             "b.save"
 
-    if (!runCommandWithStdin(consolePath, checkSaleExpression).last.contains("true"))
+    if (!runCommandWithStdin(consolePath, checkSaleExpression).mkString.contains("=> true"))
       s"找不到 #${saleID}"
     else {
       val output = runCommandWithStdin(consolePath, restoreExpression)
