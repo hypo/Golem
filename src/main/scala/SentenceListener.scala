@@ -121,6 +121,9 @@ class RestoreCommandDispatcher(val admins: List[String], val consolePath: String
     case VerbWithSaleID("restore", saleID, List("to", email), req) ⇒ requireAdmin(req.sender, admins) {
       restoreSaleToEditor(saleID, Some(email))
     }
+    case VerbWithSaleID("restore", saleID, List("to", email, mailtoLink), req) ⇒ requireAdmin(req.sender, admins) {
+      restoreSaleToEditor(saleID, Some(email))
+    }
   }
 }
 
