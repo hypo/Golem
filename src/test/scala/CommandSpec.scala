@@ -7,7 +7,7 @@ import org.jivesoftware.smack.packet._
 
 class CommandSpec extends Specification {
   "RestoreCommand" should {
-    val dispatcher = new RestoreCommandDispatcher(List())
+    val dispatcher = new RestoreCommandDispatcher(List(), "/bin/cat")
 
     "Match 'restore [#]saleid' " in {
       dispatcher.process.isDefinedAt(Request(sender="yllan@hypo.cc", body="restore #123")) must beTrue
