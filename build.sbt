@@ -17,7 +17,9 @@ scalaVersion := "2.10.0"
 
 libraryDependencies ++= Seq(
   "com.typesafe" % "config" % "1.0.0",
-  "org.specs2" %% "specs2" % "1.13" % "test"
+  "org.specs2" %% "specs2" % "1.13" % "test",
+  "org.apache.httpcomponents" % "httpclient" % "4.2.2",
+  "org.apache.httpcomponents" % "httpmime" % "4.2.2"
 )
 
 scalacOptions ++= Seq("-feature")

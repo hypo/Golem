@@ -6,6 +6,9 @@ import scala.sys.process._
 import com.typesafe.config._
 import scala.collection.JavaConverters._
 import java.io._
+import scala.util._
+
+import cc.hypo.Golem.service._
 
 /* Add convenient method to Config */
 object Implicits {
@@ -54,6 +57,11 @@ class SentenceListener(val config: Config) extends MessageListener {
       admins = config.stringListOpt("authorized-users") getOrElse List(), 
       consolePath = config.stringOpt("restore-dispatcher.rails-console-path").getOrElse("/bin/cat")
     ),
+    new JsonCommandDispatcher(
+      admins = config.stringListOpt("authorized-users") getOrElse List(), 
+      consolePath = config.stringOpt("restore-dispatcher.rails-console-path").getOrElse("/bin/cat"),
+      gistToken = config.stringOpt("gist-token").getOrElse("NO TOKEN")
+    ),
     new UnknowCommandDispatcher()
   )
 
@@ -62,12 +70,30 @@ class SentenceListener(val config: Config) extends MessageListener {
   val composedDispatcher = dispatchers.map(_.process).reduceLeft((f1, f2) => f1 orElse f2)
 }
 
-trait CommandDispatcher {
+trait CommandDispatcher extends CommandLineProcessTool {
   def process: PartialFunction[Request, String]
 
   def requireAdmin(sender: String, admins: List[String])(f: => String): String = {
     if (admins.exists(admin => sender.startsWith(admin + "/"))) f
     else "你不是管理者，你壞壞。"
+  }
+
+  def requireExistSale(consolePath: String, saleID: String)(f: => String): String = {
+    val checkSaleExpression = s"(HypoOrder.find_by_sale_id $saleID) != nil"
+    if (!runCommandWithStdin(consolePath, checkSaleExpression).mkString.contains("=> true")) 
+      s"找不到 #${saleID}"
+    else 
+      f
+  }
+}
+
+trait CommandLineProcessTool {
+  def runCommandWithStdin(command: String, stdin: String): Seq[String] = {
+    println("Running: " + command)
+    println("With: " + stdin)
+    val output: Seq[String] = (Process(command) #< new ByteArrayInputStream(s"$stdin\n" getBytes "UTF-8")).lines_!
+    println("Output: " + output.mkString("\n"))
+    output
   }
 }
 
@@ -90,33 +116,37 @@ object VerbWithSaleID {
   }
 }
 
+class JsonCommandDispatcher(val admins: List[String], val consolePath: String, val gistToken: String) extends AnyRef with CommandDispatcher {
+  def process = {
+    case VerbWithSaleID("json", saleID, nil, req) ⇒ requireAdmin(req.sender, admins) {
+      requireExistSale(consolePath, saleID) {
+        val tempFilePath = s"/tmp/${saleID}-${scala.util.Random.alphanumeric.take(10)}.json"
+        val getDataExpression = 
+          s"""  o = HypoOrder.find_by_sale_id $saleID;
+                File.open("$tempFilePath", "w") {|f| f.write(o.data); f.close }
+          """
+        runCommandWithStdin(consolePath, getDataExpression)
+        val jsonContent = scala.io.Source.fromFile(new File(tempFilePath)).mkString
+
+        Gist(gistToken).createGist(s"JSON for $saleID at ${new java.util.Date}", false, Set(GistFile("${saleID}.json", jsonContent))) match {
+          case Success(url) => url
+          case Failure(e) => e.toString
+        }
+      }
+    }
+  }
+}
+
 class RestoreCommandDispatcher(val admins: List[String], val consolePath: String) extends AnyRef with CommandDispatcher {
   
-  def restoreSaleToEditor(saleID: String, toAccount: Option[String] = None): String = {
-    import scala.language.postfixOps
-
-    def runCommandWithStdin(command: String, stdin: String): Seq[String] = {
-      println("Running: " + command)
-      println("With: " + stdin)
-      val output: Seq[String] = (Process(command) #< new ByteArrayInputStream(s"$stdin\n" getBytes "UTF-8")).lines_!
-      println("Output: " + output.mkString("\n"))
-      output
-    }
-      
-    val checkSaleExpression = s"(HypoOrder.find_by_sale_id $saleID) != nil"
-    val restoreExpression = 
-                            s"o = HypoOrder.find_by_sale_id $saleID;" +
+  def restoreSaleToEditor(saleID: String, toAccount: Option[String] = None): String = requireExistSale(consolePath, saleID) {
+    val restoreExpression = s"o = HypoOrder.find_by_sale_id $saleID;" +
                             "b = o.to_book;" +
                             toAccount.map(account ⇒ s"b.user = '$account';").getOrElse("") +
                             "b.save"
-
-    if (!runCommandWithStdin(consolePath, checkSaleExpression).mkString.contains("=> true"))
-      s"找不到 #${saleID}"
-    else {
-      val output = runCommandWithStdin(consolePath, restoreExpression)
-      if (output.mkString.contains("=> true")) s"成功放回 #$saleID" + toAccount.map(account ⇒ s" to $account").getOrElse("")
-      else "好像有錯誤喔：\n" + output.mkString("\n")
-    }
+    val output = runCommandWithStdin(consolePath, restoreExpression)
+    if (output.mkString.contains("=> true")) s"成功放回 #$saleID" + toAccount.map(account ⇒ s" to $account").getOrElse("")
+    else "好像有錯誤喔：\n" + output.mkString("\n")  
   }
 
   def process = {
