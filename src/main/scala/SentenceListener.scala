@@ -145,7 +145,7 @@ class JsonCommandDispatcher(val admins: List[String], val consolePath: String, v
   def process = {
     case VerbWithSaleID("json", saleID, nil, req) ⇒ requireAdmin(req.sender, admins) {
       requireExistSale(consolePath, saleID) {
-        val tempFilePath = s"/tmp/${saleID}-${scala.util.Random.alphanumeric.take(10)}.json"
+        val tempFilePath = s"/tmp/${saleID}-${scala.util.Random.alphanumeric.take(10).mkString}.json"
         val getDataExpression = 
           s"""  o = HypoOrder.find_by_sale_id $saleID;
                 File.open("$tempFilePath", "w") {|f| f.write(o.data); f.close }

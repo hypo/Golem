@@ -11,4 +11,6 @@ Golem - Hypo automation bot via XMPP (i.e. GoogleTalk, iChat)
 
   2. Chat to him. You can use the following commands:
 
-  - `restore #12345`: 把 wide/square 的進度放回。
+  - `restore #12345`: 把書本進度放回原作者 editor。
+  - `restore #12345 to someone@example.org` 把書本進度放回 someone@example.org。
+  - `json #12345` 取得 someone@example.org 的 json 資料。
