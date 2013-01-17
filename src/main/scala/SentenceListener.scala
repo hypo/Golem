@@ -127,7 +127,7 @@ class JsonCommandDispatcher(val admins: List[String], val consolePath: String, v
       else {
         val currentChar = original.head
         val (formatted, newInString, newIndentLevel) = currentChar match {
-          case '{' | '[' if !inString ⇒ (currentChar + "\n" + tab * indentLevel + 1, inString, indentLevel + 1)
+          case '{' | '[' if !inString ⇒ (currentChar + "\n" + tab * (indentLevel + 1), inString, indentLevel + 1)
           case '}' | ']' if !inString ⇒ ("\n" + tab * (indentLevel - 1) + currentChar, inString, indentLevel - 1)
           case ',' if !inString ⇒ (",\n" + tab * indentLevel, inString, indentLevel)
           case ':' if !inString ⇒ (": ", inString, indentLevel)
@@ -153,7 +153,7 @@ class JsonCommandDispatcher(val admins: List[String], val consolePath: String, v
         runCommandWithStdin(consolePath, getDataExpression)
         val jsonContent = reformat(scala.io.Source.fromFile(new File(tempFilePath)).mkString)
 
-        Gist(gistToken).createGist(s"JSON for $saleID at ${new java.util.Date}", false, Set(GistFile("${saleID}.json", jsonContent))) match {
+        Gist(gistToken).createGist(s"JSON for $saleID at ${new java.util.Date}", false, Set(GistFile(saleID + ".json", jsonContent))) match {
           case Success(url) ⇒ url
           case Failure(e) ⇒ e.toString
         }
