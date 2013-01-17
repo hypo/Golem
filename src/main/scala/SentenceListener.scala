@@ -7,6 +7,7 @@ import com.typesafe.config._
 import scala.collection.JavaConverters._
 import java.io._
 import scala.util._
+import scala.annotation._
 
 import cc.hypo.Golem.service._
 
@@ -74,7 +75,7 @@ trait CommandDispatcher extends CommandLineProcessTool {
   def process: PartialFunction[Request, String]
 
   def requireAdmin(sender: String, admins: List[String])(f: => String): String = {
-    if (admins.exists(admin => sender.startsWith(admin + "/"))) f
+    if (admins.exists(admin ⇒ sender.startsWith(admin + "/"))) f
     else "你不是管理者，你壞壞。"
   }
 
@@ -117,6 +118,30 @@ object VerbWithSaleID {
 }
 
 class JsonCommandDispatcher(val admins: List[String], val consolePath: String, val gistToken: String) extends AnyRef with CommandDispatcher {
+  def reformat(json: String) = {
+    val tab = "  "
+
+    @tailrec 
+    def reformatIter(newJson: String, original: String, previousChar: Char, inString: Boolean, indentLevel: Int): String = {
+      if (original.length == 0) newJson
+      else {
+        val currentChar = original.head
+        val (formatted, newInString, newIndentLevel) = currentChar match {
+          case '{' | '[' if !inString ⇒ (currentChar + "\n" + tab * indentLevel + 1, inString, indentLevel + 1)
+          case '}' | ']' if !inString ⇒ ("\n" + tab * (indentLevel - 1) + currentChar, inString, indentLevel - 1)
+          case ',' if !inString ⇒ (",\n" + tab * indentLevel, inString, indentLevel)
+          case ':' if !inString ⇒ (": ", inString, indentLevel)
+          case ' ' | '\n' | '\t' if !inString ⇒ ("", inString, indentLevel)
+          case '"' ⇒ (currentChar, if (previousChar == '\'') inString else !inString, indentLevel)
+          case c ⇒ (currentChar, inString, indentLevel)
+        }
+        reformatIter(newJson + formatted, original.tail, currentChar, newInString, newIndentLevel)
+      }
+    }
+
+    reformatIter("", json, ' ', false, 0)
+  }
+
   def process = {
     case VerbWithSaleID("json", saleID, nil, req) ⇒ requireAdmin(req.sender, admins) {
       requireExistSale(consolePath, saleID) {
@@ -126,11 +151,11 @@ class JsonCommandDispatcher(val admins: List[String], val consolePath: String, v
                 File.open("$tempFilePath", "w") {|f| f.write(o.data); f.close }
           """
         runCommandWithStdin(consolePath, getDataExpression)
-        val jsonContent = scala.io.Source.fromFile(new File(tempFilePath)).mkString
+        val jsonContent = reformat(scala.io.Source.fromFile(new File(tempFilePath)).mkString)
 
         Gist(gistToken).createGist(s"JSON for $saleID at ${new java.util.Date}", false, Set(GistFile("${saleID}.json", jsonContent))) match {
-          case Success(url) => url
-          case Failure(e) => e.toString
+          case Success(url) ⇒ url
+          case Failure(e) ⇒ e.toString
         }
       }
     }

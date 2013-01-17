@@ -15,7 +15,7 @@ case class GistFile(val filename: String, val content: String)
 
 case class Gist(val token: String) {
   def jsonStringForGist(description: String, public: Boolean, files: Set[GistFile]): String = {
-    val filesJson = files.map(gf => s""""${JSONFormat.quoteString(gf.filename)}":{"content":"${JSONFormat.quoteString(gf.content)}"}""").mkString("{", ",", "}")
+    val filesJson = files.map(gf ⇒ s""""${JSONFormat.quoteString(gf.filename)}":{"content":"${JSONFormat.quoteString(gf.content)}"}""").mkString("{", ",", "}")
     s"""
     {
       "description":"${JSONFormat.quoteString(description)}",
@@ -31,7 +31,6 @@ case class Gist(val token: String) {
       post.setHeader("Authorization", "token " + token)
       post.setEntity(new StringEntity(jsonStringForGist(description, public, files), ContentType.create("application/json", "UTF-8")))
       val response = client.execute(post)
-      client.getConnectionManager.shutdown
 
       if (response.getStatusLine.getStatusCode == 201) {
         val body = EntityUtils.toString(response.getEntity)
@@ -41,7 +40,7 @@ case class Gist(val token: String) {
         Failure(new Throwable("response status != 201"))
       }
     } catch {
-      case e: Throwable => {
+      case e: Throwable ⇒ {
         client.getConnectionManager.shutdown
         Failure(e)
       }
