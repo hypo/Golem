@@ -4,6 +4,13 @@ gtalk-password="password"
 # if not set, everyone is invalid user.
 authorized-users=["admin1@gmail.com"]
 
+my-sql-socket="/mysqld.sock"
+
+gist-token="gist-token"
+
 restore-dispatcher {
+  editor-db-url="jdbc:mysql://localhost/db"
+  editor-db-user="user"
+  editor-db-password="password"
   rails-console-path="/path/to/rails/console"
 }

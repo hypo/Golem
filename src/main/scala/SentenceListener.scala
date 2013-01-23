@@ -53,14 +53,21 @@ class SentenceListener(val config: Config) extends MessageListener {
     chat reply composedDispatcher(Request(sender = message.getFrom, body = message.getBody))
   }
 
+  val editorDB = EditorDatabase(
+    url = config.stringOpt("restore-dispatcher.editor-db-url").getOrElse("jdbc:mysql://localhost/defaultdb"),
+    user = config.stringOpt("restore-dispatcher.editor-db-user").getOrElse("hypo"),
+    password = config.stringOpt("restore-dispatcher.editor-db-password").getOrElse("pass"),
+    socketFile = config.stringOpt("my-sql-socket").getOrElse("/var/mysqld.sock")
+    )
+
   val dispatchers = List(
     new RestoreCommandDispatcher(
       admins = config.stringListOpt("authorized-users") getOrElse List(), 
-      consolePath = config.stringOpt("restore-dispatcher.rails-console-path").getOrElse("/bin/cat")
+      editorDB = editorDB
     ),
     new JsonCommandDispatcher(
       admins = config.stringListOpt("authorized-users") getOrElse List(), 
-      consolePath = config.stringOpt("restore-dispatcher.rails-console-path").getOrElse("/bin/cat"),
+      editorDB = editorDB,
       gistToken = config.stringOpt("gist-token").getOrElse("NO TOKEN")
     ),
     new UnknowCommandDispatcher()
@@ -79,12 +86,8 @@ trait CommandDispatcher extends CommandLineProcessTool {
     else "你不是管理者，你壞壞。"
   }
 
-  def requireExistSale(consolePath: String, saleID: String)(f: => String): String = {
-    val checkSaleExpression = s"(HypoOrder.find_by_sale_id $saleID) != nil"
-    if (!runCommandWithStdin(consolePath, checkSaleExpression).mkString.contains("=> true")) 
-      s"找不到 #${saleID}"
-    else 
-      f
+  def requireExistSale(editorDB: EditorDatabase, saleID: String)(f: (HypoOrder) => String): String = {
+    editorDB.orderForSaleID(saleID).map(f(_)).getOrElse(s"找不到 #${saleID}")
   }
 }
 
@@ -117,62 +120,64 @@ object VerbWithSaleID {
   }
 }
 
-class JsonCommandDispatcher(val admins: List[String], val consolePath: String, val gistToken: String) extends AnyRef with CommandDispatcher {
+class JsonCommandDispatcher(val admins: List[String], val editorDB: EditorDatabase, val gistToken: String) extends AnyRef with CommandDispatcher {
+  // For more readable but slower version, check: https://gist.github.com/raw/4603514/1eb0e8866b5f536ba7d4a7bb2d020d6e285b19e1/stringbuilder.scala
   def reformat(json: String) = {
     val tab = "  "
-
-    @tailrec 
-    def reformatIter(newJson: String, original: String, previousChar: Char, inString: Boolean, indentLevel: Int): String = {
-      if (original.length == 0) newJson
-      else {
-        val currentChar = original.head
-        val (formatted, newInString, newIndentLevel) = currentChar match {
-          case '{' | '[' if !inString ⇒ (currentChar + "\n" + tab * (indentLevel + 1), inString, indentLevel + 1)
-          case '}' | ']' if !inString ⇒ ("\n" + tab * (indentLevel - 1) + currentChar, inString, indentLevel - 1)
-          case ',' if !inString ⇒ (",\n" + tab * indentLevel, inString, indentLevel)
-          case ':' if !inString ⇒ (": ", inString, indentLevel)
-          case ' ' | '\n' | '\t' if !inString ⇒ ("", inString, indentLevel)
-          case '"' ⇒ (currentChar, if (previousChar == '\'') inString else !inString, indentLevel)
-          case c ⇒ (currentChar, inString, indentLevel)
-        }
-        reformatIter(newJson + formatted, original.tail, currentChar, newInString, newIndentLevel)
+    var inString = false
+    var indentLevel = 0
+   
+    var index = 0;
+    val stringLength = json.length
+    val formatted = new StringBuilder
+   
+    while (index < stringLength) {
+      val c = json.charAt(index)
+      if (!inString && (c == '{' || c == '[')) {
+        indentLevel += 1
+        formatted.append(c).append("\n" + (tab * indentLevel))
+      } else if (!inString && (c == '}' || c == ']')) {
+        indentLevel -= 1
+        formatted.append("\n" + (tab * indentLevel)).append(c)
+      } else if (!inString && c == ',') {
+        formatted.append(",\n" + (tab * indentLevel))
+      } else if (!inString && c == ':') {
+        formatted.append(": ")
+      } else if (!inString && (c == ' ' || c == '\n' || c == '\t')) {
+        /* skip */
+      } else if (c == '"') {
+        formatted.append(c)
+        if (index > 0 && json.charAt(index - 1) != '\'') inString = !inString
+      } else {
+        formatted.append(c)
       }
+      index += 1
     }
-
-    reformatIter("", json, ' ', false, 0)
+    formatted.toString
   }
+
 
   def process = {
     case VerbWithSaleID("json", saleID, nil, req) ⇒ requireAdmin(req.sender, admins) {
-      requireExistSale(consolePath, saleID) {
-        val tempFilePath = s"/tmp/${saleID}-${scala.util.Random.alphanumeric.take(10).mkString}.json"
-        val getDataExpression = 
-          s"""  o = HypoOrder.find_by_sale_id $saleID;
-                File.open("$tempFilePath", "w") {|f| f.write(o.data); f.close }
-          """
-        runCommandWithStdin(consolePath, getDataExpression)
-        val jsonContent = reformat(scala.io.Source.fromFile(new File(tempFilePath)).mkString)
-
+      requireExistSale(editorDB, saleID) ((o: HypoOrder) => {
+        val jsonContent = reformat(o.extractedData.getOrElse(""))
         Gist(gistToken).createGist(s"JSON for $saleID at ${new java.util.Date}", false, Set(GistFile(saleID + ".json", jsonContent))) match {
           case Success(url) ⇒ url
           case Failure(e) ⇒ e.toString
         }
-      }
+      })
     }
   }
 }
 
-class RestoreCommandDispatcher(val admins: List[String], val consolePath: String) extends AnyRef with CommandDispatcher {
+class RestoreCommandDispatcher(val admins: List[String], val editorDB: EditorDatabase) extends AnyRef with CommandDispatcher {
   
-  def restoreSaleToEditor(saleID: String, toAccount: Option[String] = None): String = requireExistSale(consolePath, saleID) {
-    val restoreExpression = s"o = HypoOrder.find_by_sale_id $saleID;" +
-                            "b = o.to_book;" +
-                            toAccount.map(account ⇒ s"b.user = '$account';").getOrElse("") +
-                            "b.save"
-    val output = runCommandWithStdin(consolePath, restoreExpression)
-    if (output.mkString.contains("=> true")) s"成功放回 #$saleID" + toAccount.map(account ⇒ s" to $account").getOrElse("")
-    else "好像有錯誤喔：\n" + output.mkString("\n")  
-  }
+  def restoreSaleToEditor(saleID: String, toAccount: Option[String] = None): String = 
+    requireExistSale(editorDB, saleID) ((o: HypoOrder) => {
+      val b = o.toBook.copy(user = (toAccount orElse o.user))
+      editorDB.insertBook(b)
+      s"成功放回 #$saleID" + toAccount.map(account ⇒ s" to $account").getOrElse("")    
+  })
 
   def process = {
     case VerbWithSaleID("restore", saleID, Nil, req) ⇒ requireAdmin(req.sender, admins) {
@@ -189,6 +194,8 @@ class RestoreCommandDispatcher(val admins: List[String], val consolePath: String
 
 class UnknowCommandDispatcher extends AnyRef with CommandDispatcher {
   def process = {
-    case req: Request ⇒ s"什麼是 '${req.body}'？"
+    case req: Request ⇒ {
+      s"什麼是 '${req.body}'？"
+    }
   }
 }
